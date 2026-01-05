@@ -36,7 +36,7 @@ class SeedGenerator:
     def get_next_seed(self):
         """
         核心邏輯：從上次的局面繼續往下走，直到找到下一個合格的 FEN。
-        如果當前局面已不可用（子力太少或不平衡），則自動重頭開始。
+        修改：輸出的局面必須讓『當前走棋方』處於平手或小優勢。
         """
         attempts = 0
         while attempts < 100:  # 防止無限死迴圈
@@ -55,7 +55,7 @@ class SeedGenerator:
             # 3. 篩選平衡動作
             balanced_candidates = [
                 m['Move'] for m in top_moves 
-                if m['Centipawn'] is not None and abs(m['Centipawn']) <= self.EVAL_THRESHOLD
+                if m['Centipawn'] is not None and abs(m['Centipawn']) <= self.EVAL_THRESHOLD + 50
             ]
             
             if not balanced_candidates:
@@ -73,17 +73,23 @@ class SeedGenerator:
             self.board.push_uci(chosen_move)
             attempts += 1
 
-            # 6. 判定「新局面」是否適合作為種子回傳
-            # 我們不希望回傳太早期的局面（如前 10 步），所以檢查子力數量
+            # --- 判定輸出的種子是否合格 ---
             piece_count = len(self.board.piece_map())
             if self.MIN_PIECES <= piece_count <= self.MAX_PIECES:
                 self.sf.set_fen_position(self.board.fen())
                 eval_data = self.sf.get_evaluation()
                 
-                if eval_data['type'] == 'cp' and abs(eval_data['value']) <= self.EVAL_THRESHOLD:
-                    return self.board.fen()
+                if eval_data['type'] == 'cp':
+                    eval_val = eval_data['value']
+                    
+                    # 計算『當前走棋方』的視角分數 (Relative Score)
+                    side_to_move_eval = eval_val if self.board.turn == chess.WHITE else -eval_val
+                    
+                    # 1. side_to_move_eval >= -10: 確保當前走棋方平手或有優勢 (給予 10 cp 的寬容值)
+                    # 2. side_to_move_eval <= EVAL_THRESHOLD: 確保優勢不要太大，否則對手隨便下都輸，沒戲劇性
+                    if -10 <= side_to_move_eval <= self.EVAL_THRESHOLD:
+                        return self.board.fen()
             
-            # 如果這步走完已經不合格了，迴圈會繼續執行下一手
         return None
 
     def _is_board_usable(self):
